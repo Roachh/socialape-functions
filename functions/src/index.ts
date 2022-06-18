@@ -2,8 +2,8 @@ import * as functions from "firebase-functions";
 import * as admin from 'firebase-admin';
 import * as express from 'express';
 import * as firebase from "firebase/app";
-import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
-import firebaseConfig from '../../config'
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
+import firebaseConfig from './config'
 
 const app = express();
 
@@ -52,6 +52,25 @@ app.post('/scream', (req, res) => {
     })
 });
 
+function isEmail(emailString: string) {
+  const regex = new RegExp(/^(([^<>()[\].,;:\s@"]+(\.[^<>()[\].,;:\s@"]+)*)|(".+"))@(([^<>()[\].,;:\s@"]+\.)+[^<>()[\].,;:\s@"]{2,})$/i);
+  if (!emailString || regex.test(emailString) === false) {
+    return false;
+  }
+  return true;
+}
+
+const isEmpty = (string: string) => {
+  return string.trim() === '';
+}
+
+type userError = {
+  email?: string,
+  password?: string,
+  confirmPassword?: string,
+  handle?: string
+}
+
 // Sign up route
 
 app.post('/signup', (req, res) => {
@@ -62,6 +81,22 @@ app.post('/signup', (req, res) => {
     handle: req.body.handle,
   };
 
+  let errors: userError = {};
+
+  if (isEmpty(newUser.email)) {
+    errors.email = 'Must not be empty';
+  } else if (!isEmail(newUser.email)) {
+    errors.email = 'Must be a valid email address';
+  }
+
+  if (isEmpty(newUser.password)) errors.password = 'Must not be empty';
+  if (newUser.password !== newUser.confirmPassword) errors.confirmPassword = 'Passwords must match';
+  if (isEmpty(newUser.handle)) errors.handle = 'Must not be empty';
+
+  if (Object.keys(errors).length > 0) {
+    res.status(400).json(errors);
+    return;
+  }
   // TODO validate data
   let token: string, userId: string;
 
@@ -98,19 +133,41 @@ app.post('/signup', (req, res) => {
       } else {
         return res.status(500).json({ error: err.code });
       }
-
     })
-
 })
 
-//  createUserWithEmailAndPassword(auth, newUser.email, newUser.password)
-//   .then(data => {
-//     return res.status(201).json({ message: `user ${data.user.uid} signed up successfully`})
-//   })
-//   .catch(err => {
-//     console.error(err);
-//     return res.status(500).json({ error: err.code });
-//   })
+app.post('/login', (req, res) => {
+  const user = {
+    email: req.body.email,
+    password: req.body.password,
+  }
+
+  let errors: userError = {};
+
+  if (isEmpty(user.email)) errors.email = 'Must not be empty';
+  if (isEmpty(user.password)) errors.password = 'Must not be empty';
+
+  if (Object.keys(errors).length > 0) {
+    res.status(400).json(errors);
+    return;
+  }
+
+  signInWithEmailAndPassword(auth, user.email, user.password)
+    .then(data => {
+      return data?.user.getIdToken();
+    })
+    .then(token => {
+      return res.json({ token });
+    })
+    .catch(err => {
+      console.log(err);
+      if (err.code === 'auth/wrong-password') {
+        return res.status(403).json({ general: 'Wrong credentials, please try again' });
+      } else {
+        return res.status(500).json({ error: err.code });
+      }
+    })
+})
 
 
 export const api = functions.region('southamerica-east1').https.onRequest(app);
